@@ -7,6 +7,7 @@ import sys
 import struct
 import select
 import argparse
+from datetime import datetime
 
 if sys.platform.startswith('win32'):
 	timer = time.perf_counter
@@ -17,7 +18,6 @@ ICMP_ECHO = 8
 ICMP_ECHOREPLY = 0
 CODE = 0
 MIN_SLEEP = 1000.00
-
 
 def calculate_checksum(packet):
 
@@ -59,7 +59,7 @@ def is_valid_ip(hostname_ip):
 		return False
 	
 	for part in ip_parts:
-		
+
 		try:
 			if int(part) < 0 or int(part) > 255:
 				return False
@@ -78,11 +78,12 @@ def to_ip(hostname):
 
 class Ping:
 
-	def __init__(self, destination_server, count_of_packets, timeout_in_ms, packet_size):
+	def __init__(self, destination_server, count_of_packets, timeout_in_ms, packet_size, showtime):
 		self.destination_server = destination_server
 		self.count_of_packets = count_of_packets
 		self.timeout_in_ms = timeout_in_ms
 		self.packet_size = packet_size
+		self.showtime = showtime
 		if self.packet_size > 65507:
 			print("ping: packet size too large: {} > 65507".format(self.packet_size))
 			sys.exit()
@@ -111,7 +112,11 @@ class Ping:
 		print("Request timeout for icmp_seq {}".format(self.seq_no))
 
 	def print_success(self, data_len, from_address, ttl, delay):
-		print("{} bytes from {}: icmp_seq={} ttl={} time={:.3f} ms".format(data_len, from_address, self.seq_no, ttl, delay))
+		if self.showtime == False:
+			print("{} bytes from {}: icmp_seq={} ttl={} time={:.3f} ms".format(data_len, from_address, self.seq_no, ttl, delay))
+		else:
+			print("{} {} bytes from {}: icmp_seq={} ttl={} time={:.3f} ms".format(datetime.now().time(), data_len, from_address, self.seq_no, ttl, delay))
+
 
 	def print_exit(self):
 		print("--- {} ping statistics ---".format(self.destination_server))
@@ -136,9 +141,14 @@ class Ping:
 	def start_ping(self):
 
 		try:
-			while self.count_of_packets > 0:
-				self.pinger()
-				self.count_of_packets -= 1
+			if self.count_of_packets > 0:
+				while self.count_of_packets > 0:
+					self.pinger()
+					self.count_of_packets -= 1
+			else:
+				while True:
+					self.pinger()
+					self.count_of_packets -= 1
 
 		except KeyboardInterrupt:  # handle Ctrl+C
 			print()
@@ -195,6 +205,7 @@ class Ping:
 		startvalue = 65
 		header = struct.pack("!BBHHH", ICMP_ECHO, CODE, checksum, self.identifier, self.seq_no)
 		# Type(1) Code(1) checksum(2) identifier(2) seq_no(2)
+
 		payload = []
 		for i in range(startvalue, startvalue + self.packet_size):
 			payload.append(i & 0xff)
@@ -250,14 +261,16 @@ class Ping:
 def create_parser():
 	parser = argparse.ArgumentParser()
 	parser.add_argument('destination_server')
-	parser.add_argument('-c', '--count', required=False, nargs='?', default=4, type=int, metavar='Count of packets')
-	parser.add_argument('-t', '--timeout', required=False, nargs='?', default=1000, type=int, metavar='Timeout in ms')
-	parser.add_argument('-p', '--packet_size', required=False, nargs='?', default=55, type=int, metavar='Packet size in bytes')
+	parser.add_argument('-c', dest='count', required=False, nargs='?', default=-1, type=int, help='Count of packets', metavar='4')
+	parser.add_argument('-t', dest='timeout', required=False, nargs='?', default=1000, type=int, help='Timeout in ms', metavar='1000')
+	parser.add_argument('-p', dest='packet_size', required=False, nargs='?', default=64, type=int, help='Packet size in bytes', metavar='64')
+	parser.add_argument('-i', dest='wait', required=False, nargs='?', default=1, type=float, help='Wait time in s', metavar='1')
+	parser.add_argument('--show-time', dest='showtime', action="store_true", help='Show system time')
 	return parser
 
 
-def ping(destination_server, timeout=1000, count=4, packet_size=55):
-	p = Ping(destination_server, count, timeout, packet_size)
+def ping(destination_server, timeout=1000, count=-1, packet_size=64, showtime=False):
+	p = Ping(destination_server, count, timeout, packet_size, showtime)
 	p.start_ping()
 
 
@@ -268,4 +281,6 @@ if __name__ == '__main__':
 	timeout = args.timeout
 	packet_size = args.packet_size
 	count = args.count
-	ping(destination_server, timeout, count, packet_size)
+	MIN_SLEEP = MIN_SLEEP * args.wait
+	showtime = args.showtime
+	ping(destination_server, timeout, count, packet_size, showtime)
